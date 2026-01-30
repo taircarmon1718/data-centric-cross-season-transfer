@@ -1,0 +1,21 @@
+# OS / IDE
+.DS_Store
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Large data / outputs
+data/
+datasets/
+check/
+models/
+delete/
+
+# Heavy eval outputs
+scripts/eval/outputs/
+scripts/eval/outputs_TF/
+
+# Pretrained weights
+*.pt
