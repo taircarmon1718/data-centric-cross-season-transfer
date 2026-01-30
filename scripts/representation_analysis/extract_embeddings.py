@@ -3,17 +3,27 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 from PIL import Image
+import torch
 
 from utils.io import collect_image_records, save_embeddings
 from utils.model_utils import load_yolo_backbone
+from pathlib import Path
+import os
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+os.chdir(PROJECT_ROOT)
 
 def main(model_path: str, out_dir: str = "outputs/rep_analysis", device: str = "cuda"):
     # map seasons -> splits -> paths
     root_map = {
-        "2024": {"train": "datasets/train_on_all/images", "val": "datasets/train_on_all/val/images"},
-        "2025": {"train": "datasets/train_on_2025_all/images", "val": "datasets/train_on_2025_all/val/images"},
+        "2024": {
+            "all": "datasets/train_on_all",
+        },
+        "2025": {
+            "all": "datasets/train_on_2025_all",
+        },
     }
+
     records = collect_image_records(root_map)
     if len(records) == 0:
         print("No images found; exiting.")
