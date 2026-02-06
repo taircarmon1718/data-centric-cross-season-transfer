@@ -1,0 +1,11 @@
+image_id,season,stratum,d_shift
+datasets/train_on_2025_all\val\images\frame_00038_jpg.rf.92aebc9f7c406273bffccf46b4784e97.jpg,2025,LOW,0.04028569534420967
+datasets/train_on_2025_all\images\frame_00058_jpg.rf.0169f3fefa646c4f6ea7aa838e3e2d7b.jpg,2025,LOW,0.037602782249450684
+datasets/train_on_2025_all\val\images\frame_00080_jpg.rf.3f47a50ca5ab22074d46d4d5e7430630.jpg,2025,MID,0.0704132542014122
+datasets/train_on_2025_all\images\GX010664_MP4-0079_jpg.rf.2f51dc1253c50faa758ffc167ea60433.jpg,2025,MID,0.08442729711532593
+datasets/train_on_2025_all\images\frame_00093_jpg.rf.a70de9b15a46983f92a75ccd7790f9b8.jpg,2025,MID,0.07021643221378326
+datasets/train_on_2025_all\images\GX010665_MP4-0152_jpg.rf.f4b4ecb7871c7f27ed499fd20a420e03.jpg,2025,HIGH,0.18763387203216553
+datasets/train_on_2025_all\images\GX010665_MP4-0203_jpg.rf.d3e22227841f0ea8f470b788ccc6d7ea.jpg,2025,HIGH,0.1746533364057541
+datasets/train_on_2025_all\images\GX010665_MP4-0200_jpg.rf.1510087345131349beb283e1722503cd.jpg,2025,HIGH,0.2584608495235443
+datasets/train_on_2025_all\images\GX010665_MP4-0171_jpg.rf.94b38e93e0033cf29489d60ce98a1b7d.jpg,2025,HIGH,0.2381623238325119
+datasets/train_on_2025_all\images\GX010665_MP4-0191_jpg.rf.382ff4fd72c375f6c4ae8a8122f977d8.jpg,2025,HIGH,0.21272516250610352
