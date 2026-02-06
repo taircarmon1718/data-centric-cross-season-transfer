@@ -16,6 +16,9 @@
 from ultralytics import YOLO
 from pathlib import Path
 import os
+#!/usr/bin/env python3
+
+
 
 # ============================================================
 # USER PATHS
