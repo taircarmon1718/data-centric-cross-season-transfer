@@ -19,12 +19,15 @@ from PIL import Image
 from ultralytics import YOLO
 
 # ========= Editable paths =========
-CAR_IMAGES_DIR = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/data/images/test_2025_gamma/test_images_2025_gamma/ALL_IMAGES_640x360")
+from pathlib import Path
+
+BASE_DIR = Path.home() / "Desktop" / "data-centric-cross-season-transfer"
+CAR_IMAGES_DIR = BASE_DIR/"data"/"images"/"test_2025_gamma"/"test_images_2025_gamma"/"ALL_IMAGES_640x360"
 BODY_IMAGES_DIR = CAR_IMAGES_DIR
-CAR_XLSX = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/data/excel/TEST_2025_Carapace_WITH_OBB_v2.xlsx")
-BODY_XLSX = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/data/excel/TEST_2025_Body_WITH_OBB_v2.xlsx")
-MODEL_ROOTS = [Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/models/TF/tf_grids/B3_final")]
-OUT_ROOT = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/scripts/eval/outputs_TF/final/B3_final/test_on_2025")
+CAR_XLSX = BASE_DIR/"data"/"excel"/"TEST_2025_Carapace_WITH_OBB_v2.xlsx"
+BODY_XLSX = BASE_DIR/"data"/"excel"/"TEST_2025_Body_WITH_OBB_v2.xlsx"
+MODEL_ROOTS = [BASE_DIR/"models"/"TF"/"TL_Optim_core_set"/"2025_core_set_random"]
+OUT_ROOT = BASE_DIR/"scripts"/"eval"/"outputs_TF"/"TL_Optim_core_set"/"2025_core_set_random"/"test_on_2025"
 
 # ========= Settings =========
 CONF_TH = 0.25
