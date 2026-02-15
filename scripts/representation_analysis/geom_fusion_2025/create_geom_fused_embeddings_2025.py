@@ -101,32 +101,41 @@ def angle_between(v1, v2):
 
 
 def build_geom_descriptor(kpts):
-    K = kpts.shape[0]
-    if K < 2:
+    """Procrustes-based body-frame shape descriptor for 4 keypoints.
+
+    Steps (exact as in 2024 implementation):
+      - rostrum index = 2 is origin
+      - tail index = 3 defines body axis
+      - translate so rostrum at (0,0)
+      - rotate so body axis aligns to +x
+      - scale by body length L = ||tail - rostrum||
+      - compute Frobenius norm of 4x2 matrix and divide (no reflection)
+      - flatten to 8D vector [x0,y0,x1,y1,...]
+    Returns 1D numpy array length 8 or None on failure.
+    """
+    kpts = np.asarray(kpts, dtype=float)
+    if kpts.shape[0] < 4 or kpts.shape[1] != 2:
         return None
-    vecs = kpts[1:] - kpts[:-1]
-    seg_lengths = np.linalg.norm(vecs, axis=1)
-    body_vec = kpts[-1] - kpts[0]
-    body_len = np.linalg.norm(body_vec)
-    if body_len <= 1e-8:
-        body_len = np.maximum(1e-8, np.mean(seg_lengths) if seg_lengths.size>0 else 1.0)
-    norm_seg = seg_lengths / body_len
-    pair_dists = []
-    for i in range(K):
-        for j in range(i+1, K):
-            d = np.linalg.norm(kpts[j] - kpts[i]) / body_len
-            pair_dists.append(d)
-    pair_dists = np.array(pair_dists)
-    ang_cos = []
-    for i in range(len(vecs)-1):
-        v1 = vecs[i]
-        v2 = vecs[i+1]
-        a = angle_between(v1, v2)
-        ang_cos.append(math.cos(a))
-    ang_cos = np.array(ang_cos)
-    gv = body_vec / (np.linalg.norm(body_vec) + 1e-12)
-    gv_cos, gv_sin = float(gv[0]), float(gv[1])
-    desc = np.concatenate([norm_seg, pair_dists, ang_cos, np.array([gv_cos, gv_sin])])
+    rostrum = kpts[2].astype(float)
+    tail = kpts[3].astype(float)
+    body_vec = tail - rostrum
+    L = np.linalg.norm(body_vec)
+    if L <= 1e-8:
+        return None
+    translated = kpts - rostrum
+    angle = math.atan2(body_vec[1], body_vec[0])
+    c = math.cos(-angle)
+    s = math.sin(-angle)
+    R = np.array([[c, -s], [s, c]])
+    rotated = (R @ translated.T).T
+    body_scaled = rotated / L
+    F = np.linalg.norm(body_scaled)
+    if F <= 1e-12:
+        return None
+    shape = body_scaled / F
+    desc = shape.reshape(-1)
+    if desc.shape[0] != 8:
+        return None
     return desc
 
 # --- I/O helpers ---
@@ -260,4 +269,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

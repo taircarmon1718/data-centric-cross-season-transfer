@@ -26,8 +26,8 @@ CAR_IMAGES_DIR = BASE_DIR/"data"/"images"/"test_2025_gamma"/"test_images_2025_ga
 BODY_IMAGES_DIR = CAR_IMAGES_DIR
 CAR_XLSX = BASE_DIR/"data"/"excel"/"TEST_2025_Carapace_WITH_OBB_v2.xlsx"
 BODY_XLSX = BASE_DIR/"data"/"excel"/"TEST_2025_Body_WITH_OBB_v2.xlsx"
-MODEL_ROOTS = [BASE_DIR/"models"/"TF"/"TL_Optim_core_set"/"2025_core_set_random"]
-OUT_ROOT = BASE_DIR/"scripts"/"eval"/"outputs_TF"/"TL_Optim_core_set"/"2025_core_set_random"/"test_on_2025"
+MODEL_ROOTS = [BASE_DIR/"models"/"TF"/"TL_Optim_core_set"/"k_yolo_embeddings"]
+OUT_ROOT = BASE_DIR/"scripts"/"eval"/"outputs_TF"/"TL_Optim_core_set"/"2025_core_set_k_yolo_embeddings"/"test_on_2025"
 
 # ========= Settings =========
 CONF_TH = 0.25

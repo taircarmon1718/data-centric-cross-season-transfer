@@ -138,49 +138,53 @@ def angle_between(v1, v2):
 
 
 def build_geom_descriptor(kpts):
-    """Build geometric descriptor from Kx2 normalized keypoints (K>=2).
-    Returns 1D numpy array.
-    Components:
-      - normalized consecutive segment lengths (K-1)
-      - normalized pairwise distances upper triangle (excluding duplicates)
-      - angles between consecutive segments (K-2) as cos(angle)
-      - global orientation: unit vector from first to last point (cos,sin)
-    Normalized by body_length = distance(first,last) or fallback to mean interpoint distance.
+    """Build a Procrustes-style body-frame shape descriptor for 4 keypoints.
+
+    Steps:
+      - Use rostrum (index 2) as origin; tail index 3 defines body axis.
+      - Translate so rostrum at (0,0).
+      - Compute body vector = tail - rostrum, length L. Require L > eps.
+      - Scale coordinates by 1/L (scale invariance) and rotate so body axis aligns to +x.
+      - After body-frame normalization stack 4x2 matrix, center is at rostrum (0,0).
+      - Apply Frobenius norm normalization (divide matrix by its Frobenius norm). Do NOT reflect.
+      - Flatten to 8D vector [x0,y0,x1,y1,...].
+    Returns 1D numpy array length 8 or None on failure.
     """
-    K = kpts.shape[0]
-    if K < 2:
+    kpts = np.asarray(kpts, dtype=float)
+    if kpts.shape[0] < 4 or kpts.shape[1] != 2:
         return None
-    # vectors between consecutive keypoints
-    vecs = kpts[1:] - kpts[:-1]  # (K-1,2)
-    seg_lengths = np.linalg.norm(vecs, axis=1)  # (K-1,)
-    # body length
-    body_vec = kpts[-1] - kpts[0]
-    body_len = np.linalg.norm(body_vec)
-    if body_len <= 1e-8:
-        # fallback: mean segment length
-        body_len = np.maximum(1e-8, np.mean(seg_lengths) if seg_lengths.size>0 else 1.0)
-    # normalized consecutive lengths
-    norm_seg = seg_lengths / body_len
-    # pairwise upper-triangle distances normalized
-    pair_dists = []
-    for i in range(K):
-        for j in range(i+1, K):
-            d = np.linalg.norm(kpts[j] - kpts[i]) / body_len
-            pair_dists.append(d)
-    pair_dists = np.array(pair_dists)
-    # angles between consecutive segments: cos(angle)
-    ang_cos = []
-    for i in range(len(vecs)-1):
-        v1 = vecs[i]
-        v2 = vecs[i+1]
-        a = angle_between(v1, v2)
-        ang_cos.append(math.cos(a))
-    ang_cos = np.array(ang_cos)
-    # global orientation: unit vector from first to last
-    gv = body_vec / (np.linalg.norm(body_vec) + 1e-12)
-    gv_cos, gv_sin = float(gv[0]), float(gv[1])
-    # assemble descriptor
-    desc = np.concatenate([norm_seg, pair_dists, ang_cos, np.array([gv_cos, gv_sin])])
+    # Enforce keypoint order expectation: 0 carapace,1 eyes,2 rostrum,3 tail
+    rostrum = kpts[2].astype(float)
+    tail = kpts[3].astype(float)
+
+    body_vec = tail - rostrum
+    L = np.linalg.norm(body_vec)
+    if L <= 1e-8:
+        return None
+
+    # translate so rostrum at origin
+    translated = kpts - rostrum
+
+    # rotate so body_vec aligns with +x
+    angle = math.atan2(body_vec[1], body_vec[0])
+    c = math.cos(-angle)
+    s = math.sin(-angle)
+    R = np.array([[c, -s], [s, c]])
+    rotated = (R @ translated.T).T
+
+    # scale by body length
+    body_scaled = rotated / L
+
+    # Now perform Procrustes-like normalization: divide by Frobenius norm (no reflection)
+    F = np.linalg.norm(body_scaled)  # Frobenius norm
+    if F <= 1e-12:
+        return None
+    shape = body_scaled / F
+
+    # flatten in row-major order: x0,y0,x1,y1,...
+    desc = shape.reshape(-1)
+    if desc.shape[0] != 8:
+        return None
     return desc
 
 
@@ -273,12 +277,13 @@ def main():
         print('yolo_kept.shape =', yolo_kept.shape, 'geom.shape =', geom_array.shape, file=sys.stderr)
         return
 
-    # Normalize geometric embeddings: z-score across dataset, then optional L2 normalize
+    # --- New normalization: compute mean/std on raw shape descriptors (2024 reference)
     mean = np.mean(geom_array, axis=0)
     std = np.std(geom_array, axis=0)
     std_adj = np.where(std < 1e-12, 1.0, std)
+    # z-score
     geom_z = (geom_array - mean) / std_adj
-    # L2 normalize rows
+    # L2 normalize each row
     norms = np.linalg.norm(geom_z, axis=1, keepdims=True)
     norms = np.where(norms < 1e-12, 1.0, norms)
     geom_norm = geom_z / norms
@@ -307,4 +312,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
