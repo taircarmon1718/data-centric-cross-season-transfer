@@ -425,41 +425,61 @@ def run_single_k(
     experiment_root: Path,
 ) -> dict | None:
     k_dir = experiment_root / f"K_{budget_k}"
-    if k_dir.exists():
-        print(f"[K={budget_k}] Folder exists, skipping to avoid overwrite: {k_dir}")
-        return None
 
     print(f"\n========== Running K={budget_k} ==========")
-    (k_dir / "dataset").mkdir(parents=True, exist_ok=False)
-    (k_dir / "model").mkdir(parents=True, exist_ok=False)
+    k_dir.mkdir(parents=True, exist_ok=True)
+    (k_dir / "dataset").mkdir(parents=True, exist_ok=True)
+    (k_dir / "model").mkdir(parents=True, exist_ok=True)
+    dataset_root = k_dir / "dataset"
+    model_root = k_dir / "model"
+    yaml_path = dataset_root / "data.yaml"
+    existing_best = model_root / "best.pt"
 
-    lengths = np.array([d["length"] for d in analysis], dtype=np.float64)
-    angles = np.array([d["angle"] for d in analysis], dtype=np.float64)
-    bends = np.array([d["bend"] for d in analysis], dtype=np.float64)
-    geo_block = np.stack([lengths, angles, bends], axis=1)
-    fused = np.concatenate([zscore(yolo_reduced), ALPHA * zscore(geo_block)], axis=1)
+    images_train = dataset_root / "images" / "train"
+    labels_train = dataset_root / "labels" / "train"
+    dataset_ready = (
+        yaml_path.exists()
+        and images_train.exists()
+        and labels_train.exists()
+        and any(images_train.iterdir())
+        and any(labels_train.iterdir())
+    )
 
-    selected_idx = select_fixed_budget(analysis, fused, budget_k)
-    selected_paths = [Path(analysis[i]["image_path"]) for i in selected_idx]
-    print(f"[K={budget_k}] Requested={budget_k}, selected before label check={len(selected_paths)}")
+    if dataset_ready:
+        copied = sum(1 for _ in images_train.iterdir())
+        missing_labels = max(0, int(budget_k) - copied)
+        print(f"[K={budget_k}] Reusing existing dataset with {copied} images.")
+    else:
+        lengths = np.array([d["length"] for d in analysis], dtype=np.float64)
+        angles = np.array([d["angle"] for d in analysis], dtype=np.float64)
+        bends = np.array([d["bend"] for d in analysis], dtype=np.float64)
+        geo_block = np.stack([lengths, angles, bends], axis=1)
+        fused = np.concatenate([zscore(yolo_reduced), ALPHA * zscore(geo_block)], axis=1)
 
-    copied, missing_labels = build_dataset(selected_paths, k_dir / "dataset")
-    if copied == 0:
-        print(f"[K={budget_k}] No samples copied (all labels missing). Skipping training.")
-        results = {
-            "K": int(budget_k),
-            "num_images": 0,
-            "missing_labels": int(missing_labels),
-            "mAP50": float("nan"),
-            "mAP50_95": float("nan"),
-            "precision": float("nan"),
-            "recall": float("nan"),
-        }
-        (k_dir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-        return results
+        selected_idx = select_fixed_budget(analysis, fused, budget_k)
+        selected_paths = [Path(analysis[i]["image_path"]) for i in selected_idx]
+        print(f"[K={budget_k}] Requested={budget_k}, selected before label check={len(selected_paths)}")
 
-    yaml_path = k_dir / "dataset" / "data.yaml"
-    best_weights = train_model(SOURCE_MODEL, yaml_path, k_dir / "model")
+        copied, missing_labels = build_dataset(selected_paths, dataset_root)
+        if copied == 0:
+            print(f"[K={budget_k}] No samples copied (all labels missing). Skipping training.")
+            results = {
+                "K": int(budget_k),
+                "num_images": 0,
+                "missing_labels": int(missing_labels),
+                "mAP50": float("nan"),
+                "mAP50_95": float("nan"),
+                "precision": float("nan"),
+                "recall": float("nan"),
+            }
+            (k_dir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+            return results
+
+    if existing_best.exists():
+        print(f"[K={budget_k}] Reusing existing model: {existing_best}")
+        best_weights = existing_best
+    else:
+        best_weights = train_model(SOURCE_MODEL, yaml_path, model_root)
     eval_metrics = evaluate_model(best_weights, yaml_path)
 
     results = {
@@ -495,6 +515,23 @@ def write_summary(summary_rows: list[dict], out_csv: Path) -> None:
                     "recall": r["recall"],
                 }
             )
+
+
+def is_k_complete(k_dir: Path) -> bool:
+    dataset_yaml = k_dir / "dataset" / "data.yaml"
+    images_train = k_dir / "dataset" / "images" / "train"
+    labels_train = k_dir / "dataset" / "labels" / "train"
+    model_best = k_dir / "model" / "best.pt"
+    results_json = k_dir / "results.json"
+
+    if not dataset_yaml.exists() or not model_best.exists() or not results_json.exists():
+        return False
+    if not images_train.exists() or not labels_train.exists():
+        return False
+
+    has_images = any(images_train.iterdir())
+    has_labels = any(labels_train.iterdir())
+    return has_images and has_labels
 
 
 def main() -> None:
@@ -545,6 +582,18 @@ def main() -> None:
 
     summary_rows = []
     for k in K_VALUES:
+        k_dir = EXPERIMENT_ROOT / f"K_{k}"
+        if is_k_complete(k_dir):
+            print(f"[K={k}] Complete run found, skipping.")
+            try:
+                existing = json.loads((k_dir / "results.json").read_text(encoding="utf-8"))
+                summary_rows.append(existing)
+            except Exception:
+                pass
+            continue
+
+        if k_dir.exists():
+            print(f"[K={k}] Incomplete folder found. Resuming missing steps in: {k_dir}")
         res = run_single_k(k, analysis, yolo_reduced, EXPERIMENT_ROOT)
         if res is not None:
             summary_rows.append(res)
