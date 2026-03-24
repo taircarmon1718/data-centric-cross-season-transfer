@@ -145,12 +145,14 @@ def load_embeddings(meta_csv: Path, vectors_npy: Path) -> tuple[pd.DataFrame, np
 def run_error_analysis(model_path: Path, image_paths: list[Path]) -> list[dict]:
     model = YOLO(str(model_path))
     device = 0 if torch.cuda.is_available() else "cpu"
+    # Use stream=True to avoid accumulating all results in RAM
     results = model.predict(
         source=[str(p) for p in image_paths],
         imgsz=640,
         device=device,
         verbose=False,
         conf=0.001,
+        stream=True,
     )
 
     data = []
@@ -282,7 +284,6 @@ flip_idx: [0,1,2,3]
 
 def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
     device = 0 if torch.cuda.is_available() else "cpu"
-
     model1 = YOLO(str(base_weights))
     model1.train(
         data=str(yaml_path),
@@ -300,7 +301,6 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         exist_ok=True,
         verbose=False,
     )
-
     stage1_weights = out_dir / "weights" / "last.pt"
     model2 = YOLO(str(stage1_weights))
     model2.train(
@@ -319,7 +319,6 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         exist_ok=True,
         verbose=False,
     )
-
     stage2_weights = out_dir / "weights" / "last.pt"
     model3 = YOLO(str(stage2_weights))
     results = model3.train(
@@ -339,7 +338,15 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         exist_ok=True,
         verbose=False,
     )
-    return Path(results.save_dir) / "weights" / "best.pt"
+    # Robustly get save_dir from results
+    save_dir = None
+    if isinstance(results, dict) and 'save_dir' in results:
+        save_dir = results['save_dir']
+    elif hasattr(results, 'save_dir'):
+        save_dir = results.save_dir
+    else:
+        raise RuntimeError("Could not determine save_dir from YOLO.train() results.")
+    return Path(save_dir) / "weights" / "best.pt"
 
 
 def evaluate_model(model_path: Path, yaml_path: Path) -> dict:
