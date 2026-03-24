@@ -313,8 +313,17 @@ flip_idx: [0,1,2,3]
 
 def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
     device = 0 if torch.cuda.is_available() else "cpu"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_save_dir(train_result):
+        if isinstance(train_result, dict) and "save_dir" in train_result:
+            return Path(train_result["save_dir"])
+        if hasattr(train_result, "save_dir"):
+            return Path(train_result.save_dir)
+        raise RuntimeError("Could not determine save_dir from YOLO.train() results.")
+
     model1 = YOLO(str(base_weights))
-    model1.train(
+    results1 = model1.train(
         data=str(yaml_path),
         epochs=30,
         freeze=20,
@@ -325,14 +334,22 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         amp=False,
         workers=4,
         device=device,
-        project=str(out_dir.parent),
-        name=out_dir.name,
+        project=str(out_dir),
+        name="stage1",
         exist_ok=True,
         verbose=False,
     )
-    stage1_weights = out_dir / "weights" / "last.pt"
+    stage1_dir = _get_save_dir(results1)
+    stage1_weights = stage1_dir / "weights" / "last.pt"
+    if not stage1_weights.exists():
+        alt = stage1_dir / "weights" / "best.pt"
+        if alt.exists():
+            stage1_weights = alt
+        else:
+            raise FileNotFoundError(f"Stage 1 weights not found in {stage1_dir / 'weights'}")
+
     model2 = YOLO(str(stage1_weights))
-    model2.train(
+    results2 = model2.train(
         data=str(yaml_path),
         epochs=40,
         freeze=15,
@@ -343,14 +360,22 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         amp=False,
         workers=4,
         device=device,
-        project=str(out_dir.parent),
-        name=out_dir.name,
+        project=str(out_dir),
+        name="stage2",
         exist_ok=True,
         verbose=False,
     )
-    stage2_weights = out_dir / "weights" / "last.pt"
+    stage2_dir = _get_save_dir(results2)
+    stage2_weights = stage2_dir / "weights" / "last.pt"
+    if not stage2_weights.exists():
+        alt = stage2_dir / "weights" / "best.pt"
+        if alt.exists():
+            stage2_weights = alt
+        else:
+            raise FileNotFoundError(f"Stage 2 weights not found in {stage2_dir / 'weights'}")
+
     model3 = YOLO(str(stage2_weights))
-    results = model3.train(
+    results3 = model3.train(
         data=str(yaml_path),
         epochs=10,
         freeze=0,
@@ -362,20 +387,23 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         amp=False,
         workers=4,
         device=device,
-        project=str(out_dir.parent),
-        name=out_dir.name,
+        project=str(out_dir),
+        name="stage3",
         exist_ok=True,
         verbose=False,
     )
-    # Robustly get save_dir from results
-    save_dir = None
-    if isinstance(results, dict) and 'save_dir' in results:
-        save_dir = results['save_dir']
-    elif hasattr(results, 'save_dir'):
-        save_dir = results.save_dir
-    else:
-        raise RuntimeError("Could not determine save_dir from YOLO.train() results.")
-    return Path(save_dir) / "weights" / "best.pt"
+    final_dir = _get_save_dir(results3)
+    final_best = final_dir / "weights" / "best.pt"
+    if not final_best.exists():
+        alt = final_dir / "weights" / "last.pt"
+        if alt.exists():
+            final_best = alt
+        else:
+            raise FileNotFoundError(f"Final weights not found in {final_dir / 'weights'}")
+
+    stable_best = out_dir / "best.pt"
+    shutil.copy2(final_best, stable_best)
+    return stable_best
 
 
 def evaluate_model(model_path: Path, yaml_path: Path) -> dict:
