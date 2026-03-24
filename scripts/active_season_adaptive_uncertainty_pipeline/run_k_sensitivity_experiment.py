@@ -27,6 +27,7 @@ Outputs are stored ONLY under:
 
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from pathlib import Path
 import json
@@ -143,20 +144,48 @@ def load_embeddings(meta_csv: Path, vectors_npy: Path) -> tuple[pd.DataFrame, np
 
 
 def run_error_analysis(model_path: Path, image_paths: list[Path]) -> list[dict]:
+    """Run memory-safe inference for uncertainty + geometry extraction.
+
+    Uses per-image prediction to avoid large CUDA allocations, and falls back to CPU
+    for individual images if a CUDA OOM happens.
+    """
     model = YOLO(str(model_path))
     device = 0 if torch.cuda.is_available() else "cpu"
-    # Use stream=True to avoid accumulating all results in RAM
-    results = model.predict(
-        source=[str(p) for p in image_paths],
-        imgsz=640,
-        device=device,
-        verbose=False,
-        conf=0.001,
-        stream=True,
-    )
 
     data = []
-    for r in results:
+    total = len(image_paths)
+    for i, img_path in enumerate(image_paths, start=1):
+        if i == 1 or i % 100 == 0 or i == total:
+            print(f"Inference progress: {i}/{total}")
+
+        try:
+            results = model.predict(
+                source=str(img_path),
+                imgsz=640,
+                device=device,
+                verbose=False,
+                conf=0.001,
+            )
+        except torch.OutOfMemoryError:
+            # Per-image fallback to CPU when GPU memory is tight.
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            try:
+                results = model.predict(
+                    source=str(img_path),
+                    imgsz=640,
+                    device="cpu",
+                    verbose=False,
+                    conf=0.001,
+                )
+            except Exception:
+                continue
+        except Exception:
+            continue
+
+        if not results:
+            continue
+        r = results[0]
         try:
             if r.keypoints is None or r.keypoints.xy is None:
                 continue
