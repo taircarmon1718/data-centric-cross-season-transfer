@@ -1,68 +1,51 @@
 #!/usr/bin/env python3
 """
-run_k_sensitivity_experiment.py
+K-sensitivity version of run_adaptive_shift_pipeline.py.
 
-Clean fixed-budget sensitivity experiment over K for geometry-aware adaptive selection.
+Behavior matches adaptive pipeline for:
+- feature construction
+- embedding fusion
+- training schedule
+- dataset/YAML generation
+- embedding-based filtering
 
-For each K in [50, 100, 200, 400, 800], this script:
-1) Runs selection using:
-   - uncertainty = 1 - confidence
-   - geometry features: length, orientation angle (atan2), bend angle
-   - morphology deviation: abs(length - mean_length)
-   - fused embedding + geometry space (PCA + z-score)
-2) Applies fixed-budget strategy:
-   - 40% top uncertainty
-   - 40% top morphology deviation
-   - 20% FPS diversity on fused space
-3) Creates dataset:
-   - dataset/images/train
-   - dataset/labels/train
-   - dataset/data.yaml
-4) Trains YOLO with existing staged configuration.
-5) Evaluates and saves metrics into results.json.
+Only intentional change:
+- runs for multiple K values
+- fixes selection union bug with deterministic exact-K selection
 
-Outputs are stored ONLY under:
-  k_sensitivity_experiment/
+Outputs:
+adaptive_k_experiment/
+  2024_to_2025/K_*/{dataset,model}
+  2025_to_2024/K_*/{dataset,model}
 """
 
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from pathlib import Path
 import json
 import csv
 import random
-import math
 import shutil
 
 import numpy as np
-import pandas as pd
 import torch
 from ultralytics import YOLO
 from sklearn.decomposition import PCA
 
 
-# ---------------- Configuration ----------------
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATASETS_ROOT = PROJECT_ROOT / "datasets"
+EXPERIMENT_ROOT = PROJECT_ROOT / "adaptive_k_experiment"
+EXPERIMENT_ROOT.mkdir(parents=True, exist_ok=True)
+
 SEED = 0
 K_VALUES = [50, 100, 200, 400, 800]
 PCA_DIM = 64
 ALPHA = 1.0
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-EXPERIMENT_ROOT = PROJECT_ROOT / "k_sensitivity_experiment"
 
-# Reusing paths from the current adaptive pipeline (2024 -> 2025 setting)
-SOURCE_MODEL = PROJECT_ROOT / "models" / "2024" / "all-ponds" / "weights" / "best.pt"
-EMBED_META = PROJECT_ROOT / "scripts" / "representation_analysis" / "outputs_repreasentation" / "rep_analysis" / "embeddings_meta.csv"
-EMBED_VEC = PROJECT_ROOT / "scripts" / "representation_analysis" / "outputs_repreasentation" / "rep_analysis" / "embeddings_vectors.npy"
-TARGET_DATASET_ROOT = PROJECT_ROOT / "datasets" / "train_on_2025_all"
-IMAGE_DIRS = [TARGET_DATASET_ROOT / "images", TARGET_DATASET_ROOT / "val" / "images"]
-LABEL_DIRS = [TARGET_DATASET_ROOT / "labels", TARGET_DATASET_ROOT / "val" / "labels"]
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-
-
-def set_deterministic(seed: int = 0) -> None:
+def set_deterministic(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -72,22 +55,18 @@ def set_deterministic(seed: int = 0) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def zscore(x: np.ndarray) -> np.ndarray:
+def zscore(x):
     return (x - x.mean(axis=0)) / (x.std(axis=0) + 1e-8)
 
 
-def fps(points: np.ndarray, k: int) -> list[int]:
-    if points.shape[0] == 0 or k <= 0:
+def fps(points, k):
+    if len(points) == 0:
         return []
-    if k >= points.shape[0]:
-        return list(range(points.shape[0]))
-
     centroid = points.mean(axis=0)
     dists = np.linalg.norm(points - centroid, axis=1)
     selected = [int(np.argmax(dists))]
     min_d = np.linalg.norm(points - points[selected[0]], axis=1)
-
-    while len(selected) < k:
+    while len(selected) < min(k, len(points)):
         idx = int(np.argmax(min_d))
         selected.append(idx)
         d = np.linalg.norm(points - points[idx], axis=1)
@@ -95,211 +74,122 @@ def fps(points: np.ndarray, k: int) -> list[int]:
     return selected
 
 
-def compute_bend_angle(kpts: np.ndarray) -> float:
-    # kpt indices: 0 carapace, 2 rostrum, 3 tail
-    car = kpts[0]
-    ros = kpts[2]
-    tail = kpts[3]
+def compute_bend_angle(k):
+    car = k[0]
+    ros = k[2]
+    tail = k[3]
     v1 = ros - car
     v2 = tail - car
     n1 = np.linalg.norm(v1)
     n2 = np.linalg.norm(v2)
-    if n1 <= 1e-12 or n2 <= 1e-12:
+    if n1 == 0 or n2 == 0:
         return 0.0
     cosv = np.dot(v1, v2) / (n1 * n2)
     cosv = np.clip(cosv, -1.0, 1.0)
-    return float(np.degrees(np.arccos(cosv)))
+    return np.degrees(np.arccos(cosv))
 
 
-def collect_images() -> list[Path]:
-    out = []
-    seen = set()
-    for d in IMAGE_DIRS:
-        if not d.exists():
-            continue
-        for p in sorted(d.rglob("*")):
-            if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
-                rp = p.resolve()
-                if str(rp) in seen:
-                    continue
-                seen.add(str(rp))
-                out.append(rp)
-    return out
-
-
-def load_embeddings(meta_csv: Path, vectors_npy: Path) -> tuple[pd.DataFrame, np.ndarray]:
-    meta = pd.read_csv(meta_csv)
+def load_embeddings(meta_csv, vectors_npy):
+    meta = np.genfromtxt(meta_csv, delimiter=",", dtype=str, skip_header=1)
+    image_names = meta[:, 0]
     vectors = np.load(vectors_npy)
-    if len(meta) != vectors.shape[0]:
-        m = min(len(meta), vectors.shape[0])
-        meta = meta.iloc[:m].reset_index(drop=True)
-        vectors = vectors[:m]
-
-    cols = [str(c).strip() for c in meta.columns]
-    meta.columns = cols
-    if "image_path" not in meta.columns:
-        meta = meta.rename(columns={meta.columns[0]: "image_path"})
-    meta["basename"] = meta["image_path"].astype(str).apply(lambda p: Path(str(p).replace("\\", "/")).name)
-    return meta, vectors
+    return image_names, vectors
 
 
-def run_error_analysis(model_path: Path, image_paths: list[Path]) -> list[dict]:
-    """Run memory-safe inference for uncertainty + geometry extraction.
-
-    Uses per-image prediction to avoid large CUDA allocations, and falls back to CPU
-    for individual images if a CUDA OOM happens.
-    """
+def run_error_analysis(model_path, image_dir):
     model = YOLO(str(model_path))
     device = 0 if torch.cuda.is_available() else "cpu"
-
+    results = model.predict(
+        source=str(image_dir),
+        imgsz=640,
+        device=device,
+        verbose=False,
+        conf=0.001,
+    )
     data = []
-    total = len(image_paths)
-    for i, img_path in enumerate(image_paths, start=1):
-        if i == 1 or i % 100 == 0 or i == total:
-            print(f"Inference progress: {i}/{total}")
-
-        try:
-            results = model.predict(
-                source=str(img_path),
-                imgsz=640,
-                device=device,
-                verbose=False,
-                conf=0.001,
-            )
-        except torch.OutOfMemoryError:
-            # Per-image fallback to CPU when GPU memory is tight.
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            try:
-                results = model.predict(
-                    source=str(img_path),
-                    imgsz=640,
-                    device="cpu",
-                    verbose=False,
-                    conf=0.001,
-                )
-            except Exception:
-                continue
-        except Exception:
+    for r in results:
+        if r.keypoints is None:
             continue
-
-        if not results:
+        kpts = r.keypoints.xy.cpu().numpy()
+        confs = r.keypoints.conf.cpu().numpy()
+        if len(kpts) == 0:
             continue
-        r = results[0]
-        try:
-            if r.keypoints is None or r.keypoints.xy is None:
-                continue
-            kpts = r.keypoints.xy.cpu().numpy()
-            confs = r.keypoints.conf.cpu().numpy() if r.keypoints.conf is not None else None
-            if len(kpts) == 0:
-                continue
-            k = kpts[0]
-            if k.shape[0] < 4:
-                continue
-            if confs is None or len(confs) == 0:
-                uncertainty = 1.0
-            else:
-                c = confs[0]
-                uncertainty = float(1.0 - np.mean(c))
-            length = float(np.linalg.norm(k[2] - k[0]))
-            vec = k[2] - k[0]
-            angle = float(np.arctan2(vec[1], vec[0]))
-            bend = compute_bend_angle(k)
-            data.append(
-                {
-                    "image_path": str(Path(r.path).resolve()),
-                    "image": Path(r.path).name,
-                    "uncertainty": uncertainty,
-                    "length": length,
-                    "angle": angle,
-                    "bend": bend,
-                }
-            )
-        except Exception:
-            continue
+        k = kpts[0]
+        c = confs[0]
+        uncertainty = 1.0 - np.mean(c)
+        length = np.linalg.norm(k[2] - k[0])
+        vec = k[2] - k[0]
+        angle = np.arctan2(vec[1], vec[0])
+        bend = compute_bend_angle(k)
+        data.append(
+            {
+                "image": Path(r.path).name,
+                "uncertainty": uncertainty,
+                "length": length,
+                "angle": angle,
+                "bend": bend,
+            }
+        )
     return data
 
 
-def select_fixed_budget(analysis: list[dict], fused: np.ndarray, budget_k: int) -> list[int]:
-    n = len(analysis)
-    if n == 0:
-        return []
-    budget_k = min(int(budget_k), n)
-    if budget_k <= 0:
-        return []
-
-    uncertainties = np.array([d["uncertainty"] for d in analysis], dtype=np.float64)
-    lengths = np.array([d["length"] for d in analysis], dtype=np.float64)
-    morpho_dev = np.abs(lengths - lengths.mean())
-
-    k_unc = int(math.floor(0.4 * budget_k))
-    k_morph = int(math.floor(0.4 * budget_k))
-    k_div = budget_k - k_unc - k_morph
-
-    rank_unc = np.argsort(-uncertainties).tolist()
-    rank_morph = np.argsort(-morpho_dev).tolist()
-    rank_div = fps(fused, k_div if k_div > 0 else 0)
-
-    # Primary picks by quota
-    candidates = rank_unc[:k_unc] + rank_morph[:k_morph] + rank_div
-
-    # Unique keep-order
+def select_exact_k(analysis, fused, k):
+    k = min(int(k), len(analysis))
+    uncertainties = np.array([d["uncertainty"] for d in analysis])
+    lengths = np.array([d["length"] for d in analysis])
+    morpho_dev = np.abs(lengths - np.mean(lengths))
+    k_unc = int(k * 0.4)
+    k_morph = int(k * 0.4)
+    k_div = k - k_unc - k_morph
+    idx_unc = np.argsort(-uncertainties)[:k_unc].tolist()
+    idx_morph = np.argsort(-morpho_dev)[:k_morph].tolist()
+    idx_div = fps(fused, k_div)
+    ordered = idx_unc + idx_morph + idx_div
     selected = []
     seen = set()
-    for idx in candidates:
-        if idx not in seen:
-            selected.append(idx)
-            seen.add(idx)
-        if len(selected) >= budget_k:
-            return selected[:budget_k]
-
-    # Refill deterministically to exact K
-    refill_order = rank_unc + rank_morph + fps(fused, n)
-    for idx in refill_order:
+    for idx in ordered:
         if idx in seen:
             continue
         selected.append(idx)
         seen.add(idx)
-        if len(selected) >= budget_k:
+        if len(selected) >= k:
+            return selected
+    refill = np.argsort(-uncertainties).tolist() + np.argsort(-morpho_dev).tolist() + fps(fused, len(analysis))
+    for idx in refill:
+        if idx in seen:
+            continue
+        selected.append(idx)
+        seen.add(idx)
+        if len(selected) >= k:
             break
-    return selected[:budget_k]
+    return selected[:k]
 
 
-def find_label_for_image(image_path: Path) -> Path | None:
-    stem = image_path.stem
-    for lbl_root in LABEL_DIRS:
-        if not lbl_root.exists():
-            continue
-        direct = lbl_root / f"{stem}.txt"
-        if direct.exists():
-            return direct.resolve()
-        for p in lbl_root.rglob("*.txt"):
-            if p.stem == stem:
-                return p.resolve()
-    return None
-
-
-def build_dataset(selected_paths: list[Path], dataset_root: Path) -> tuple[int, int]:
-    images_train = dataset_root / "images" / "train"
-    labels_train = dataset_root / "labels" / "train"
-    images_train.mkdir(parents=True, exist_ok=True)
-    labels_train.mkdir(parents=True, exist_ok=True)
-
+def build_dataset(selected_names, image_dir, dataset_root, out_dataset_dir):
+    if out_dataset_dir.exists():
+        shutil.rmtree(out_dataset_dir)
+    (out_dataset_dir / "images/train").mkdir(parents=True)
+    (out_dataset_dir / "labels/train").mkdir(parents=True)
     copied = 0
-    missing_labels = 0
-    for img in selected_paths:
-        lbl = find_label_for_image(img)
-        if lbl is None or not lbl.exists():
-            missing_labels += 1
-            continue
-        try:
-            shutil.copy2(img, images_train / img.name)
-            shutil.copy2(lbl, labels_train / lbl.name)
+    missing = 0
+    for img_name in selected_names:
+        stem = Path(img_name).stem
+        copied_img = False
+        for img in image_dir.rglob(img_name):
+            shutil.copy2(img, out_dataset_dir / "images/train" / img.name)
+            copied_img = True
+            break
+        copied_lbl = False
+        for lbl in (dataset_root / "labels").rglob(stem + ".txt"):
+            shutil.copy2(lbl, out_dataset_dir / "labels/train" / lbl.name)
+            copied_lbl = True
+            break
+        if copied_img and copied_lbl:
             copied += 1
-        except Exception:
-            continue
-
-    yaml_content = f"""path: {dataset_root.resolve()}
+        else:
+            missing += 1
+    yaml_path = out_dataset_dir / "data.yaml"
+    yaml_content = f"""path: {out_dataset_dir.resolve()}
 train: images/train
 val: images/train
 nc: 1
@@ -307,23 +197,15 @@ names: ['prawn']
 kpt_shape: [4,3]
 flip_idx: [0,1,2,3]
 """
-    (dataset_root / "data.yaml").write_text(yaml_content.strip() + "\n", encoding="utf-8")
-    return copied, missing_labels
+    yaml_path.write_text(yaml_content.strip())
+    return yaml_path, copied, missing
 
 
-def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
+def train_model(base_weights, yaml_path, out_dir):
     device = 0 if torch.cuda.is_available() else "cpu"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    def _get_save_dir(train_result):
-        if isinstance(train_result, dict) and "save_dir" in train_result:
-            return Path(train_result["save_dir"])
-        if hasattr(train_result, "save_dir"):
-            return Path(train_result.save_dir)
-        raise RuntimeError("Could not determine save_dir from YOLO.train() results.")
 
     model1 = YOLO(str(base_weights))
-    results1 = model1.train(
+    r1 = model1.train(
         data=str(yaml_path),
         epochs=30,
         freeze=20,
@@ -334,22 +216,18 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         amp=False,
         workers=4,
         device=device,
-        project=str(out_dir),
-        name="stage1",
+        project=str(out_dir.parent),
+        name=out_dir.name,
         exist_ok=True,
         verbose=False,
     )
-    stage1_dir = _get_save_dir(results1)
-    stage1_weights = stage1_dir / "weights" / "last.pt"
-    if not stage1_weights.exists():
-        alt = stage1_dir / "weights" / "best.pt"
-        if alt.exists():
-            stage1_weights = alt
-        else:
-            raise FileNotFoundError(f"Stage 1 weights not found in {stage1_dir / 'weights'}")
+    stage1_dir = Path(r1.save_dir)
+    stage1 = stage1_dir / "weights" / "last.pt"
+    if not stage1.exists():
+        stage1 = stage1_dir / "weights" / "best.pt"
 
-    model2 = YOLO(str(stage1_weights))
-    results2 = model2.train(
+    model2 = YOLO(str(stage1))
+    r2 = model2.train(
         data=str(yaml_path),
         epochs=40,
         freeze=15,
@@ -360,22 +238,18 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         amp=False,
         workers=4,
         device=device,
-        project=str(out_dir),
-        name="stage2",
+        project=str(out_dir.parent),
+        name=out_dir.name,
         exist_ok=True,
         verbose=False,
     )
-    stage2_dir = _get_save_dir(results2)
-    stage2_weights = stage2_dir / "weights" / "last.pt"
-    if not stage2_weights.exists():
-        alt = stage2_dir / "weights" / "best.pt"
-        if alt.exists():
-            stage2_weights = alt
-        else:
-            raise FileNotFoundError(f"Stage 2 weights not found in {stage2_dir / 'weights'}")
+    stage2_dir = Path(r2.save_dir)
+    stage2 = stage2_dir / "weights" / "last.pt"
+    if not stage2.exists():
+        stage2 = stage2_dir / "weights" / "best.pt"
 
-    model3 = YOLO(str(stage2_weights))
-    results3 = model3.train(
+    model3 = YOLO(str(stage2))
+    r3 = model3.train(
         data=str(yaml_path),
         epochs=10,
         freeze=0,
@@ -387,220 +261,88 @@ def train_model(base_weights: Path, yaml_path: Path, out_dir: Path) -> Path:
         amp=False,
         workers=4,
         device=device,
-        project=str(out_dir),
-        name="stage3",
+        project=str(out_dir.parent),
+        name=out_dir.name,
         exist_ok=True,
         verbose=False,
     )
-    final_dir = _get_save_dir(results3)
-    final_best = final_dir / "weights" / "best.pt"
-    if not final_best.exists():
-        alt = final_dir / "weights" / "last.pt"
-        if alt.exists():
-            final_best = alt
-        else:
-            raise FileNotFoundError(f"Final weights not found in {final_dir / 'weights'}")
-
-    stable_best = out_dir / "best.pt"
-    shutil.copy2(final_best, stable_best)
-    return stable_best
+    final_dir = Path(r3.save_dir)
+    best = final_dir / "weights" / "best.pt"
+    if not best.exists():
+        best = final_dir / "weights" / "last.pt"
+    return best
 
 
-def evaluate_model(model_path: Path, yaml_path: Path) -> dict:
-    model = YOLO(str(model_path))
-    val_res = model.val(data=str(yaml_path), verbose=False)
-    metrics = {
-        "mAP50": float(getattr(val_res.box, "map50", float("nan"))),
-        "mAP50_95": float(getattr(val_res.box, "map", float("nan"))),
-        "precision": float(getattr(val_res.box, "mp", float("nan"))),
-        "recall": float(getattr(val_res.box, "mr", float("nan"))),
-    }
-    return metrics
-
-
-def run_single_k(
-    budget_k: int,
-    analysis: list[dict],
-    yolo_reduced: np.ndarray,
-    experiment_root: Path,
-) -> dict | None:
-    k_dir = experiment_root / f"K_{budget_k}"
-
-    print(f"\n========== Running K={budget_k} ==========")
-    k_dir.mkdir(parents=True, exist_ok=True)
-    (k_dir / "dataset").mkdir(parents=True, exist_ok=True)
-    (k_dir / "model").mkdir(parents=True, exist_ok=True)
-    dataset_root = k_dir / "dataset"
-    model_root = k_dir / "model"
-    yaml_path = dataset_root / "data.yaml"
-    existing_best = model_root / "best.pt"
-
-    images_train = dataset_root / "images" / "train"
-    labels_train = dataset_root / "labels" / "train"
-    dataset_ready = (
-        yaml_path.exists()
-        and images_train.exists()
-        and labels_train.exists()
-        and any(images_train.iterdir())
-        and any(labels_train.iterdir())
-    )
-
-    if dataset_ready:
-        copied = sum(1 for _ in images_train.iterdir())
-        missing_labels = max(0, int(budget_k) - copied)
-        print(f"[K={budget_k}] Reusing existing dataset with {copied} images.")
-    else:
-        lengths = np.array([d["length"] for d in analysis], dtype=np.float64)
-        angles = np.array([d["angle"] for d in analysis], dtype=np.float64)
-        bends = np.array([d["bend"] for d in analysis], dtype=np.float64)
-        geo_block = np.stack([lengths, angles, bends], axis=1)
-        fused = np.concatenate([zscore(yolo_reduced), ALPHA * zscore(geo_block)], axis=1)
-
-        selected_idx = select_fixed_budget(analysis, fused, budget_k)
-        selected_paths = [Path(analysis[i]["image_path"]) for i in selected_idx]
-        print(f"[K={budget_k}] Requested={budget_k}, selected before label check={len(selected_paths)}")
-
-        copied, missing_labels = build_dataset(selected_paths, dataset_root)
-        if copied == 0:
-            print(f"[K={budget_k}] No samples copied (all labels missing). Skipping training.")
-            results = {
-                "K": int(budget_k),
-                "num_images": 0,
-                "missing_labels": int(missing_labels),
-                "mAP50": float("nan"),
-                "mAP50_95": float("nan"),
-                "precision": float("nan"),
-                "recall": float("nan"),
-            }
-            (k_dir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-            return results
-
-    if existing_best.exists():
-        print(f"[K={budget_k}] Reusing existing model: {existing_best}")
-        best_weights = existing_best
-    else:
-        best_weights = train_model(SOURCE_MODEL, yaml_path, model_root)
-    eval_metrics = evaluate_model(best_weights, yaml_path)
-
-    results = {
-        "K": int(budget_k),
-        "num_images": int(copied),
-        "missing_labels": int(missing_labels),
-        "mAP50": eval_metrics["mAP50"],
-        "mAP50_95": eval_metrics["mAP50_95"],
-        "precision": eval_metrics["precision"],
-        "recall": eval_metrics["recall"],
-    }
-    (k_dir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-    print(f"[K={budget_k}] Done. num_images={copied}, mAP50={results['mAP50']:.4f}")
-    return results
-
-
-def write_summary(summary_rows: list[dict], out_csv: Path) -> None:
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=["K", "num_images", "mAP50", "mAP50_95", "precision", "recall"],
-        )
-        writer.writeheader()
-        for r in summary_rows:
-            writer.writerow(
-                {
-                    "K": r["K"],
-                    "num_images": r["num_images"],
-                    "mAP50": r["mAP50"],
-                    "mAP50_95": r["mAP50_95"],
-                    "precision": r["precision"],
-                    "recall": r["recall"],
-                }
-            )
-
-
-def is_k_complete(k_dir: Path) -> bool:
-    dataset_yaml = k_dir / "dataset" / "data.yaml"
-    images_train = k_dir / "dataset" / "images" / "train"
-    labels_train = k_dir / "dataset" / "labels" / "train"
-    model_best = k_dir / "model" / "best.pt"
-    results_json = k_dir / "results.json"
-
-    if not dataset_yaml.exists() or not model_best.exists() or not results_json.exists():
-        return False
-    if not images_train.exists() or not labels_train.exists():
-        return False
-
-    has_images = any(images_train.iterdir())
-    has_labels = any(labels_train.iterdir())
-    return has_images and has_labels
-
-
-def main() -> None:
-    set_deterministic(SEED)
-    EXPERIMENT_ROOT.mkdir(parents=True, exist_ok=True)
-
-    if not SOURCE_MODEL.exists():
-        raise FileNotFoundError(f"Missing source model: {SOURCE_MODEL}")
-    if not EMBED_META.exists() or not EMBED_VEC.exists():
-        raise FileNotFoundError(f"Missing embeddings: {EMBED_META} / {EMBED_VEC}")
-
-    image_paths = collect_images()
-    if len(image_paths) == 0:
-        raise RuntimeError("No target images found.")
-    print(f"Found {len(image_paths)} candidate images.")
-
-    print("Running YOLO inference for uncertainty + geometry...")
-    analysis = run_error_analysis(SOURCE_MODEL, image_paths)
-    if len(analysis) == 0:
-        raise RuntimeError("No valid inference outputs with keypoints found.")
-    print(f"Valid inference records: {len(analysis)}")
-
-    print("Loading and aligning embeddings...")
-    meta, vectors = load_embeddings(EMBED_META, EMBED_VEC)
-    emb_map = {}
-    for i, b in enumerate(meta["basename"].astype(str).tolist()):
-        if b not in emb_map:
-            emb_map[b] = i
-
+def run_direction(source_season, target_season, source_model, embed_meta_csv, embed_vectors_npy):
+    print(f"\n========== {source_season} -> {target_season} ==========")
+    dataset_root = DATASETS_ROOT / ("train_on_all" if target_season == "2024" else "train_on_2025_all")
+    image_dir = dataset_root / "images"
+    analysis = run_error_analysis(source_model, image_dir)
+    embed_names, embed_vectors = load_embeddings(embed_meta_csv, embed_vectors_npy)
+    embed_dict = {Path(name).name: vec for name, vec in zip(embed_names, embed_vectors)}
     filtered = []
     yolo_feats = []
     for d in analysis:
-        idx = emb_map.get(d["image"])
-        if idx is None:
-            continue
-        filtered.append(d)
-        yolo_feats.append(vectors[idx])
+        if d["image"] in embed_dict:
+            filtered.append(d)
+            yolo_feats.append(embed_dict[d["image"]])
     analysis = filtered
-    if len(analysis) == 0:
-        raise RuntimeError("No overlap between inference samples and embeddings.")
-
-    yolo_feats = np.asarray(yolo_feats, dtype=np.float64)
+    yolo_feats = np.array(yolo_feats)
     pca_dim = min(PCA_DIM, yolo_feats.shape[1], yolo_feats.shape[0])
     pca = PCA(n_components=pca_dim, random_state=SEED)
     yolo_reduced = pca.fit_transform(yolo_feats)
-    print(f"Fused base prepared. Records after alignment: {len(analysis)}")
-    print(f"PCA dim={pca_dim}, explained variance sum={np.sum(pca.explained_variance_ratio_):.4f}")
+    uncertainties = np.array([d["uncertainty"] for d in analysis])
+    lengths = np.array([d["length"] for d in analysis])
+    angles = np.array([d["angle"] for d in analysis])
+    bends = np.array([d["bend"] for d in analysis])
+    mean_length = np.mean(lengths)
+    _morpho_dev = np.abs(lengths - mean_length)
+    geo_block = np.stack([lengths, angles, bends], axis=1)
+    fused = np.concatenate([zscore(yolo_reduced), ALPHA * zscore(geo_block)], axis=1)
 
+    direction_root = EXPERIMENT_ROOT / f"{source_season}_to_{target_season}"
+    direction_root.mkdir(parents=True, exist_ok=True)
     summary_rows = []
+
     for k in K_VALUES:
-        k_dir = EXPERIMENT_ROOT / f"K_{k}"
-        if is_k_complete(k_dir):
-            print(f"[K={k}] Complete run found, skipping.")
-            try:
-                existing = json.loads((k_dir / "results.json").read_text(encoding="utf-8"))
-                summary_rows.append(existing)
-            except Exception:
-                pass
-            continue
+        print(f"Running K={k} for {source_season}->{target_season}")
+        selected_idx = select_exact_k(analysis, fused, k)
+        selected = [analysis[i]["image"] for i in selected_idx]
+        k_root = direction_root / f"K_{k}"
+        dataset_out = k_root / "dataset"
+        model_out = k_root / "model"
+        model_out.mkdir(parents=True, exist_ok=True)
+        yaml_path, copied, missing = build_dataset(selected, image_dir, dataset_root, dataset_out)
+        best = train_model(source_model, yaml_path, model_out)
+        result = {
+            "K": int(k),
+            "selected": int(len(selected)),
+            "copied": int(copied),
+            "missing": int(missing),
+            "best_model": str(best),
+        }
+        (k_root / "results.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        summary_rows.append(result)
 
-        if k_dir.exists():
-            print(f"[K={k}] Incomplete folder found. Resuming missing steps in: {k_dir}")
-        res = run_single_k(k, analysis, yolo_reduced, EXPERIMENT_ROOT)
-        if res is not None:
-            summary_rows.append(res)
+    with open(direction_root / "summary.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["K", "selected", "copied", "missing", "best_model"])
+        writer.writeheader()
+        writer.writerows(summary_rows)
 
-    write_summary(summary_rows, EXPERIMENT_ROOT / "summary.csv")
-    print(f"\nSummary saved to: {EXPERIMENT_ROOT / 'summary.csv'}")
-    print("Experiment complete.")
+
+def main():
+    set_deterministic(SEED)
+
+    source_model_2024 = PROJECT_ROOT / "models/2024/all-ponds/weights/best.pt"
+    source_model_2025 = PROJECT_ROOT / "models/2025/YOLOv11n_train_on_2025_all_pose_300ep_best.pt"
+    embed_meta_2024 = PROJECT_ROOT / "scripts/representation_analysis/outputs_repreasentation/rep_analysis/embeddings_meta.csv"
+    embed_vec_2024 = PROJECT_ROOT / "scripts/representation_analysis/outputs_repreasentation/rep_analysis/embeddings_vectors.npy"
+    embed_meta_2025 = PROJECT_ROOT / "outputs/rep_analysis_2025_model/embeddings_meta.csv"
+    embed_vec_2025 = PROJECT_ROOT / "outputs/rep_analysis_2025_model/embeddings_vectors.npy"
+
+    run_direction("2024", "2025", source_model_2024, embed_meta_2024, embed_vec_2024)
+    run_direction("2025", "2024", source_model_2025, embed_meta_2025, embed_vec_2025)
+    print("Done.")
 
 
 if __name__ == "__main__":
