@@ -1,7 +1,0 @@
-path: C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\k_sensitivity_experiment\K_200\dataset
-train: images/train
-val: images/train
-nc: 1
-names: ['prawn']
-kpt_shape: [4,3]
-flip_idx: [0,1,2,3]

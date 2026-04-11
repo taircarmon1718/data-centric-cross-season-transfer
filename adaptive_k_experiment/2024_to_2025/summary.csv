@@ -1,0 +1,6 @@
+K,selected,copied,missing,best_model
+50,50,50,0,C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\adaptive_k_experiment\2024_to_2025\K_50\model\train_stage3\weights\best.pt
+100,100,100,0,C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\adaptive_k_experiment\2024_to_2025\K_100\model\train_stage3\weights\best.pt
+200,200,200,0,C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\adaptive_k_experiment\2024_to_2025\K_200\model\train_stage3\weights\best.pt
+400,400,400,0,C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\adaptive_k_experiment\2024_to_2025\K_400\model\train_stage3\weights\best.pt
+800,800,800,0,C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\adaptive_k_experiment\2024_to_2025\K_800\model\train_stage3\weights\best.pt

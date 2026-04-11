@@ -39,19 +39,19 @@ from PIL import Image
 from ultralytics import YOLO
 
 # ========= Editable paths =========
-CAR_IMAGES_DIR = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/data/images/test_2024_originalSize/test_images_2024_orginalSize/carapace")
-BODY_IMAGES_DIR = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/data/images/test_2024_originalSize/test_images_2024_orginalSize/body")
+CAR_IMAGES_DIR = Path("/Users/taircarmon/Desktop/data-centric-cross-season-transfer/data/images/test_2024_originalSize/test_images_2024_orginalSize/carapace")
+BODY_IMAGES_DIR = Path("/Users/taircarmon/Desktop/data-centric-cross-season-transfer/data/images/test_2024_originalSize/test_images_2024_orginalSize/body")
 
-CAR_XLSX = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/data/excel/updated_filtered_data_with_lengths_carapace-all.xlsx")
-BODY_XLSX = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/data/excel/updated_filtered_data_with_lengths_body-all.xlsx")
+CAR_XLSX = Path("/Users/taircarmon/Desktop/data-centric-cross-season-transfer/data/excel/updated_filtered_data_with_lengths_carapace-all.xlsx")
+BODY_XLSX = Path("/Users/taircarmon/Desktop/data-centric-cross-season-transfer/data/excel/updated_filtered_data_with_lengths_body-all.xlsx")
 
 MODEL_ROOTS = [
-    Path("../../models/TF/tf_grids/B3_final"),
+    Path("../../models/TF/TL_Optim_core_set/GeoAdaptive"),
     # Path("../../models/TF/tf_grids/B2"),
     # Path("../../models/2024"),
 ]
 
-OUT_ROOT = Path("/Users/taircarmon/Desktop/Uni-Projects/prawn-size-project/scripts/eval/outputs_TF/final/B3_final/test_on_2024")
+OUT_ROOT = Path("/Users/taircarmon/Desktop/data-centric-cross-season-transfer/scripts/eval/outputs_TF/TL_Optim_core_set/GeoAdaptive/test_on_2024")
 
 # ========= Camera / geometry params =========
 HFOV_DERIVED_DEG = 76.2

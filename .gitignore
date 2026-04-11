@@ -1,12 +1,19 @@
 # OS / IDE
 .DS_Store
 .idea/
+.vscode/
 
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+.venv/
+venv/
 
-# Large data / outputs
+# Large data / outputs (not tracked)
 data/
 datasets/
 check/
@@ -17,5 +24,14 @@ delete/
 scripts/eval/outputs/
 scripts/eval/outputs_TF/
 
-# Pretrained weights
+# Pretrained / intermediate weights
 *.pt
+*.pth
+
+# Temp / lock files (e.g. Excel open locks)
+~$*.xlsx
+~$*.docx
+*.tmp
+
+# Jupyter
+.ipynb_checkpoints/

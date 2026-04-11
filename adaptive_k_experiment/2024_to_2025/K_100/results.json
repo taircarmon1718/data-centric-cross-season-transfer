@@ -1,0 +1,7 @@
+{
+  "K": 100,
+  "selected": 100,
+  "copied": 100,
+  "missing": 0,
+  "best_model": "C:\\Users\\carmonta\\Desktop\\data-centric-cross-season-transfer\\adaptive_k_experiment\\2024_to_2025\\K_100\\model\\train_stage3\\weights\\best.pt"
+}

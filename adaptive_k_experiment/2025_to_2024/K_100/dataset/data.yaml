@@ -1,0 +1,7 @@
+path: C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\adaptive_k_experiment\2025_to_2024\K_100\dataset
+train: images/train
+val: images/train
+nc: 1
+names: ['prawn']
+kpt_shape: [4,3]
+flip_idx: [0,1,2,3]

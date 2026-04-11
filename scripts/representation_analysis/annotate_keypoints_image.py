@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 import warnings
 
 # --- Configuration (the image path provided by the user) ---
-WINDOWS_IMAGE_PATH = r"C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\datasets\train_on_2025_all\images\frame_00004_jpg.rf.54b21877958724da379aee0e0e4684fa.jpg"
+WINDOWS_IMAGE_PATH = path = r"C:\Users\carmonta\Desktop\data-centric-cross-season-transfer\datasets\train_on_2025_all\images\frame_00004_jpg.rf.54b21877958724da379aee0e0e4684fa.jpg"
 # Output file
 OUT_DIR = Path("outputs/annotated_images")
 OUT_DIR.mkdir(parents=True, exist_ok=True)

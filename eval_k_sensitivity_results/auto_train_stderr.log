@@ -1,0 +1,16 @@
+/opt/anaconda3/envs/env-for-ml/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'dlopen(/opt/anaconda3/envs/env-for-ml/lib/python3.12/site-packages/torchvision/image.so, 0x0006): Library not loaded: @rpath/libjpeg.9.dylib
+  Referenced from: <367D4265-B20F-34BD-94EB-4F3EE47C385B> /opt/anaconda3/envs/env-for-ml/lib/python3.12/site-packages/torchvision/image.so
+  Reason: tried: '/opt/anaconda3/envs/env-for-ml/lib/python3.12/site-packages/torchvision/../../../libjpeg.9.dylib' (no such file), '/opt/anaconda3/envs/env-for-ml/lib/python3.12/site-packages/torchvision/../../../libjpeg.9.dylib' (no such file), '/opt/anaconda3/envs/env-for-ml/lib/python3.12/lib-dynload/../../libjpeg.9.dylib' (no such file), '/opt/anaconda3/envs/env-for-ml/bin/../lib/libjpeg.9.dylib' (no such file)'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+Traceback (most recent call last):
+  File "/Users/taircarmon/Desktop/data-centric-cross-season-transfer/scripts/active_season_adaptive_uncertainty_pipeline/run_k_sensitivity_experiment.py", line 402, in <module>
+    main()
+  File "/Users/taircarmon/Desktop/data-centric-cross-season-transfer/scripts/active_season_adaptive_uncertainty_pipeline/run_k_sensitivity_experiment.py", line 396, in main
+    run_direction("2024", "2025", source_model_2024, embed_meta_2024, embed_vec_2024)
+  File "/Users/taircarmon/Desktop/data-centric-cross-season-transfer/scripts/active_season_adaptive_uncertainty_pipeline/run_k_sensitivity_experiment.py", line 333, in run_direction
+    analysis = run_error_analysis(source_model, image_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/taircarmon/Desktop/data-centric-cross-season-transfer/scripts/active_season_adaptive_uncertainty_pipeline/run_k_sensitivity_experiment.py", line 158, in run_error_analysis
+    confs = r.keypoints.conf.cpu().numpy()
+            ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'cpu'

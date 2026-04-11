@@ -45,6 +45,50 @@ PCA_DIM = 64
 ALPHA = 1.0
 
 
+def first_existing(paths):
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+
+def resolve_dataset_root(target_season: str) -> Path:
+    if target_season == "2024":
+        candidates = [
+            DATASETS_ROOT / "train_on_all",
+            DATASETS_ROOT / "2024_smallDS_circulars",
+        ]
+    else:
+        candidates = [
+            DATASETS_ROOT / "train_on_2025_all",
+            DATASETS_ROOT / "prawn_2025_circ_small_v1",
+        ]
+    ds = first_existing(candidates)
+    if ds is None:
+        raise FileNotFoundError(f"No dataset root found for target season {target_season}. Checked: {candidates}")
+    return ds
+
+
+def resolve_embedding_pair(preferred_meta: Path, preferred_vec: Path, season: str) -> tuple[Path, Path]:
+    candidates = []
+    # preferred from script
+    candidates.append((preferred_meta, preferred_vec))
+    # common representation outputs
+    candidates.append((
+        PROJECT_ROOT / "scripts" / "representation_analysis" / "outputs_repreasentation" / "rep_analysis" / "embeddings_meta.csv",
+        PROJECT_ROOT / "scripts" / "representation_analysis" / "outputs_repreasentation" / "rep_analysis" / "embeddings_vectors.npy",
+    ))
+    # test embeddings fallback
+    candidates.append((
+        PROJECT_ROOT / "scripts" / "representation_analysis" / "test_embeddings" / "test_embeddings_meta.csv",
+        PROJECT_ROOT / "scripts" / "representation_analysis" / "test_embeddings" / "test_embeddings_vectors.npy",
+    ))
+    for m, v in candidates:
+        if m.exists() and v.exists():
+            return m, v
+    raise FileNotFoundError(f"No valid embedding pair found for season {season}.")
+
+
 def set_deterministic(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -203,6 +247,7 @@ flip_idx: [0,1,2,3]
 
 def train_model(base_weights, yaml_path, out_dir):
     device = 0 if torch.cuda.is_available() else "cpu"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     model1 = YOLO(str(base_weights))
     r1 = model1.train(
@@ -270,13 +315,21 @@ def train_model(base_weights, yaml_path, out_dir):
     best = final_dir / "weights" / "best.pt"
     if not best.exists():
         best = final_dir / "weights" / "last.pt"
-    return best
+    stable_best = out_dir / "best.pt"
+    shutil.copy2(best, stable_best)
+    return stable_best
 
 
 def run_direction(source_season, target_season, source_model, embed_meta_csv, embed_vectors_npy):
     print(f"\n========== {source_season} -> {target_season} ==========")
-    dataset_root = DATASETS_ROOT / ("train_on_all" if target_season == "2024" else "train_on_2025_all")
+    dataset_root = resolve_dataset_root(target_season)
     image_dir = dataset_root / "images"
+    if (image_dir / "train").exists():
+        image_dir = image_dir / "train"
+
+    embed_meta_csv, embed_vectors_npy = resolve_embedding_pair(
+        Path(embed_meta_csv), Path(embed_vectors_npy), source_season
+    )
     analysis = run_error_analysis(source_model, image_dir)
     embed_names, embed_vectors = load_embeddings(embed_meta_csv, embed_vectors_npy)
     embed_dict = {Path(name).name: vec for name, vec in zip(embed_names, embed_vectors)}
@@ -319,7 +372,7 @@ def run_direction(source_season, target_season, source_model, embed_meta_csv, em
             "selected": int(len(selected)),
             "copied": int(copied),
             "missing": int(missing),
-            "best_model": str(best),
+            "best_model": str(best.relative_to(PROJECT_ROOT)),
         }
         (k_root / "results.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         summary_rows.append(result)

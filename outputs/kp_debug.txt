@@ -1,0 +1,11 @@
+Image: /Users/taircarmon/Desktop/data-centric-cross-season-transfer/datasets/2024_smallDS_circulars/images/train/GX010065_8_236-jpg_gamma_jpg.rf.957e18c616758f829dbf1e77d7bfd1e0.jpg
+Image size: width=5312, height=2988
+Label: /Users/taircarmon/Desktop/data-centric-cross-season-transfer/datasets/2024_smallDS_circulars/labels/train/GX010065_8_236-jpg_gamma_jpg.rf.957e18c616758f829dbf1e77d7bfd1e0.txt
+Detected normalized (based on non-sentinel values): True
+Marker radius: 15, outline_thickness: 5
+
+Keypoints (original_label -> plotted_clamped)
+kp 0: label_x=nan label_y=nan -> plotted_x=10 plotted_y=10 outside=True
+kp 1: label_x=2564.7357 label_y=2230.7908 -> plotted_x=2565 plotted_y=2231 outside=False
+kp 2: label_x=nan label_y=nan -> plotted_x=130 plotted_y=10 outside=True
+kp 3: label_x=nan label_y=nan -> plotted_x=190 plotted_y=10 outside=True
