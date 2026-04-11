@@ -98,79 +98,12 @@ data-centric-cross-season-transfer/
     └── TF/                          # Transfer-learning model weights
 ```
 
----
-
-## Getting Started
-
-### Requirements
-
-```bash
-pip install ultralytics torch torchvision
-pip install umap-learn scikit-learn pandas openpyxl matplotlib seaborn
-```
-
-### Training
-
-Run B1 (feature extraction) grid:
-```bash
-python scripts/training_tl_models/run_B1_feature_extraction.py
-```
-
-Run B2 (staged fine-tuning) grid:
-```bash
-python scripts/training_tl_models/run_B2_staged_finetune_GRID.py
-```
-
-Run B3 (final production models):
-```bash
-python scripts/training_tl_models/run_B3_final_training.py
-```
-
-### Evaluation
-
-Evaluate on 2025 test set:
-```bash
-python scripts/eval/check_on_2025.py --model <path/to/model.pt>
-```
-
-Run K-sensitivity sweep across all adaptive-k models:
-```bash
-python run_all_k_evaluations.py \
-  --eval-script scripts/eval/check_on_2025.py \
-  --model-arg --model
-```
-
-### Representation Analysis
-
-Extract DINO embeddings and visualize season gap:
-```bash
-python scripts/representation_analysis/extract_dino_embeddings_full_2024_2025.py
-python scripts/representation_analysis/visualize_dino_umap_2024_2025.py
-```
-
----
-
-## Key Results
-
-Results are summarized in `final_Excel.xlsx` and figures are in `figs/`. Key metrics:
-- **MAE** (Mean Absolute Error) in mm
-- **MPE** (Mean Percentage Error)
-- Evaluated per-pond and aggregated across the full test set
-
-![Generalization Gap](figs/generalization_Gap.png)
-![Detection Transfer vs Baseline](figs/comparison_detection_transfer_vs_baseline.png)
-
----
+--
 
 ## Data
 
-Data is not included in this repository (gitignored). The expected structure under `data/` is:
-```
-data/
-├── images/          # Raw pond images (2024 and 2025)
-├── excel/           # Ground-truth annotation files (ImageJ + manual)
-├── kp_eval_2024_original/
-└── kp_eval_2025_gamma/
+The dataset is not included in this repository and is excluded
+Due to its size and associated constraints, the data is not publicly available, but can be provided upon reasonable request.
 ```
 
-Datasets (YOLO format) are built from the raw data using the preprocessing scripts in `scripts/preprocess/`.
+
