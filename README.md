@@ -1,8 +1,5 @@
 # Fixed-Budget Cross-Season Adaptation for Robotic Morphometric Monitoring of *Macrobrachium rosenbergii*
 
-**Tair Carmon, Eliahu D. Aflalo, Amir Sagi, Yael Edan**  
-Ben-Gurion University of the Negev · Achva Academic College
-
 ---
 
 ## Overview
@@ -10,8 +7,6 @@ Ben-Gurion University of the Negev · Achva Academic College
 Seasonal domain shift is a major challenge for robotic morphometric monitoring in commercial aquaculture. Models trained in one production season often degrade when deployed in subsequent seasons due to changes in illumination, turbidity, acquisition protocols, and pose variability.
 
 This repository contains the full code and experiments for our fixed-budget cross-season adaptation framework, applied to a mobile keypoint-based morphometric monitoring system for the giant freshwater prawn *Macrobrachium rosenbergii* in commercial recirculating aquaculture systems (RAS).
-
-![Annotated Prawns](figs/anntoated%20prawns.png)
 
 ---
 
@@ -86,9 +81,6 @@ A three-stage progressive unfreezing schedule balances representational stabilit
 | Full Transfer | S25 → S24 | 4.86 | 15.62 |
 | **Geometry-Aware (200)** | **S25 → S24** | **4.78** | **12.70** |
 
-![Detection Asymmetry](figs/comparison_detection_transfer_vs_baseline.png)
-![Generalization Gap](figs/generalization_Gap.png)
-
 ---
 
 ## Repository Structure
@@ -143,49 +135,6 @@ data-centric-cross-season-transfer/
     ├── 2024/
     ├── 2025/
     └── TF/                          # Cross-season transfer models
-```
-
----
-
-## Getting Started
-
-### Requirements
-
-```bash
-pip install ultralytics torch torchvision
-pip install umap-learn scikit-learn pandas openpyxl matplotlib seaborn
-```
-
-### Training
-
-```bash
-# Freeze-depth grid (B1: feature extraction)
-python scripts/training_tl_models/run_B1_feature_extraction.py
-
-# Staged fine-tuning grid (B2)
-python scripts/training_tl_models/run_B2_staged_finetune_GRID.py
-
-# Final production models (B3)
-python scripts/training_tl_models/run_B3_final_training.py
-```
-
-### Evaluation
-
-```bash
-# Evaluate on S25 test set
-python scripts/eval/check_on_2025.py --model <path/to/model.pt>
-
-# K-sensitivity sweep
-python run_all_k_evaluations.py \
-  --eval-script scripts/eval/check_on_2025.py \
-  --model-arg --model
-```
-
-### Representation Analysis
-
-```bash
-python scripts/representation_analysis/extract_dino_embeddings_full_2024_2025.py
-python scripts/representation_analysis/visualize_dino_umap_2024_2025.py
 ```
 
 ---
